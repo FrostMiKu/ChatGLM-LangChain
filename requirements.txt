@@ -4,3 +4,7 @@ icetk
 cpm_kernels
 torch>=1.10
 streamlit
+unstructured[local-inference]
+layoutparser[layoutmodels,tesseract]
+nltk
+beautifulsoup4

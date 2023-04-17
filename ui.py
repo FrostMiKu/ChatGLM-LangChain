@@ -1,4 +1,7 @@
 from transformers import AutoModel, AutoTokenizer
+import sentence_transformers
+from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+from utils import ProxyLLM, init_chain_proxy, init_knowledge_vector_store
 import streamlit as st
 
 MAX_CONTEXT = 720
@@ -21,7 +24,11 @@ def get_model():
     model = AutoModel.from_pretrained(
         "silver/chatglm-6b-int4-slim", trust_remote_code=True).half().cuda()
     model = model.eval()
-    return tokenizer, model
+    embeddings = HuggingFaceEmbeddings(
+        model_name="GanymedeNil/text2vec-large-chinese",)
+    embeddings.client = sentence_transformers.SentenceTransformer(
+        embeddings.model_name, device="cuda")
+    return tokenizer, model, embeddings
 
 
 if 'first_run' not in st.session_state:
@@ -31,6 +38,14 @@ if 'history' not in st.session_state:
 if 'ctx' not in st.session_state:
     st.session_state.ctx = []
 
+tokenizer, model, embeddings = get_model()
+if 'vecdb' not in st.session_state:
+    st.session_state.vecdb = init_knowledge_vector_store(
+        "./content/", embeddings)
+# vecdb = init_knowledge_vector_store("./content/", embeddings)
+proxy_chain = init_chain_proxy(ProxyLLM(), st.session_state.vecdb, 5)
+
+
 st.title("# Hello, there👋")
 ctx_dom = st.empty()
 question_dom = st.markdown(
@@ -38,14 +53,12 @@ question_dom = st.markdown(
 md_dom = st.empty()
 st.write("")
 
-tokenizer, model = get_model()
-
 
 def display_ctx(history=None):
     if history != None:
         text = ""
         for q, a in history:
-            text += ":face_with_cowboy_hat:\n{}\n\n---\n{}\n\n---\n".format(
+            text += ":face_with_cowboy_hat:\n\n{}\n\n---\n{}\n\n---\n".format(
                 q, a)
             ctx_dom.markdown(text)
 
@@ -60,6 +73,7 @@ def check_ctx_len(history):
 def predict(input, history=None):
     if history is None:
         history = []
+
     while not check_ctx_len(history):
         print("Free Context!")
         history.pop(0)
@@ -68,7 +82,10 @@ def predict(input, history=None):
                                                temperature=0.9):
         md_dom.markdown(response)
 
-    st.session_state.history.append(history[-1])
+    q, _ = st.session_state.history.pop()
+    st.session_state.history.append((q, response))
+    history.pop()
+    history.append(st.session_state.history[-1])
     return history
 
 
@@ -88,8 +105,11 @@ with st.form("form", True):
     if btn_send and prompt_text != "":
         display_ctx(st.session_state.history)
         question_dom.markdown(
-            ":face_with_cowboy_hat:\n{}\n\n---\n".format(prompt_text))
-        st.session_state.ctx = predict(prompt_text, st.session_state.ctx)
+            ":face_with_cowboy_hat:\n\n{}\n\n---\n".format(prompt_text))
+        q = proxy_chain.run(prompt_text)
+        st.session_state.history.append((prompt_text, ''))
+        print(q)
+        st.session_state.ctx = predict(q, st.session_state.ctx)
         if st.session_state.first_run:
             st.session_state.first_run = False
             st.balloons()
