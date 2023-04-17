@@ -11,7 +11,7 @@ pip install -r requirements.txt
 ```
 3. 启动程序
 ```bash
-streamlit ui --browser.gatherUsageStats False
+streamlit run ui.py --browser.gatherUsageStats False
 ```
 
 ## Screenshot
